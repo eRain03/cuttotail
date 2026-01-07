@@ -2,14 +2,14 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 
-# Farmer: 必须精确到城市
+# Farmer: must be precise to city
 class FarmerCreate(BaseModel):
     race: str
     age: int
     sex: str
     quantity: int
-    state: str       # 例如 "PA"
-    city: str        # 例如 "Santarém"
+    state: str       # e.g. "PA"
+    city: str        # e.g. "Santarém"
     contact: str
     # New fields for enhanced sale listing
     category: Optional[str] = None  # e.g., "Beef Cattle", "Dairy Cattle"
@@ -25,14 +25,14 @@ class Farmer(FarmerCreate):
     timestamp: float
     owner_id: Optional[str] = None
 
-# 辅助模型：Buyer 的目标区域
+# Helper model: Buyer's target region
 class TargetRegion(BaseModel):
     state: str       # "PA"
-    city: str        # "Santarém" 或 "ANY" (代表全州)
+    city: str        # "Santarém" or "ANY" (represents entire state)
 
-# Buyer: location 变成目标区域列表
+# Buyer: location becomes target region list
 class BuyerCreate(BaseModel):
-    targets: List[TargetRegion] # 核心变化：不再是简单的字符串列表
+    targets: List[TargetRegion] # Core change: no longer a simple string list
     race: str
     ageMin: Optional[int] = 0
     ageMax: Optional[int] = 100

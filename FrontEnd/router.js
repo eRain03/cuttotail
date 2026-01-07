@@ -47,7 +47,8 @@ const routes = [
       { path: 'data', component: () => import('./admin/DataView.vue') },
       { path: 'dashboard', component: () => import('./admin/DashboardView.vue') },
       { path: 'users', component: () => import('./admin/UsersView.vue') },
-      { path: 'listings', component: () => import('./admin/ListingsView.vue') }
+      { path: 'listings', component: () => import('./admin/ListingsView.vue') },
+      { path: 'email-config', component: () => import('./admin/EmailConfigView.vue') }
     ]
   }
 ]

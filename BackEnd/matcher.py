@@ -1,11 +1,11 @@
 import time
 from typing import Dict
 from db import db
-# ✅ 引入邮件模块
+# Import email module
 from mailer import send_match_email
 
 def save_notification(user_id: str, title: str, details: Dict):
-    """保存站内信"""
+    """Save internal message"""
     notif = {
         "user_id": user_id,
         "message": title,
@@ -17,7 +17,7 @@ def save_notification(user_id: str, title: str, details: Dict):
     print(f"🔔 Notification saved for {user_id}")
 
 def check_match(farmer: Dict, buyer: Dict) -> bool:
-    # 1. 地理位置匹配
+    # 1. Geographic location matching
     # Buyer targets: [{'state': 'PA', 'city': 'ANY'}, ...]
     # Farmer: state='PA', city='Belém'
     location_match = False
@@ -33,11 +33,11 @@ def check_match(farmer: Dict, buyer: Dict) -> bool:
 
     if not location_match: return False
 
-    # 2. 品种匹配
+    # 2. Breed matching
     if buyer.get('race') != "Any" and buyer.get('race') != farmer.get('race'):
         return False
 
-    # 3. 年龄匹配
+    # 3. Age matching
     buyer_min = buyer.get('ageMin') or 0
     buyer_max = buyer.get('ageMax') or 100
     if not (buyer_min <= farmer.get('age', 0) <= buyer_max):
@@ -56,7 +56,7 @@ def scan_for_matches(new_record: Dict, target_db_name: str, is_new_record_farmer
         if check_match(farmer, buyer):
             matches.append(target)
 
-            # --- 1. 通知新提交者 (API发起人) ---
+            # --- 1. Notify new submitter (API initiator) ---
             if 'owner_id' in new_record:
                 details = {
                     "role": "Matched with " + ("Buyer" if is_new_record_farmer else "Farmer"),
@@ -74,7 +74,7 @@ def scan_for_matches(new_record: Dict, target_db_name: str, is_new_record_farmer
                     match_details=details
                 )
 
-            # --- 2. 通知旧数据拥有者 (被动匹配) ---
+            # --- 2. Notify old data owner (passive match) ---
             if 'owner_id' in target:
                 details = {
                     "role": "New " + ("Farmer" if not is_new_record_farmer else "Buyer") + " matched you",
@@ -83,9 +83,9 @@ def scan_for_matches(new_record: Dict, target_db_name: str, is_new_record_farmer
                     "qty": new_record.get('quantity'),
                     "location": new_record.get('city', 'Unknown')
                 }
-                # A. 站内信
+                # A. Internal message
                 save_notification(target['owner_id'], "New Interest in your Listing!", details)
-                # B. 发送邮件
+                # B. Send email
                 send_match_email(
                     to_email=target.get('contact', ''),
                     subject="New Interest in your Listing!",

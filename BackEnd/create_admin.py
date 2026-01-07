@@ -16,7 +16,7 @@ def create_admin():
     except:
         users = []
 
-    # 检查是否存在
+    # Check if exists
     if any(u['username'] == username for u in users):
         print("User already exists!")
         return
@@ -29,7 +29,7 @@ def create_admin():
         "last_name": "Admin",
         "phone": "00000000",
         "address": "HQ",
-        "role": "admin", # 关键字段
+        "role": "admin", # Key field
         "created_at": time.time()
     }
 

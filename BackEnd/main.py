@@ -15,15 +15,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from logging.handlers import RotatingFileHandler
 
-# 引入本地模块
+# Import local modules
 from auth import get_password_hash, verify_password, create_access_token, get_current_user
-from mailer import send_contact_info_email
+from mailer import send_contact_info_email, send_verification_code_email, get_email_config, save_email_config, reload_email_config
 from models import FarmerCreate, BuyerCreate
+import random
 
 # ==========================================
-# 1. 核心配置与日志
+# 1. Core Configuration and Logging
 # ==========================================
-# ✅ 关键修复：显式定义所有数据文件路径 (钉死在根目录)
+# Key fix: Explicitly define all data file paths (fixed to root directory)
 BASE_DIR = os.getcwd()
 DB_USERS = os.path.join(BASE_DIR, "users.json")
 DB_FARMERS = os.path.join(BASE_DIR, "farmers.json")
@@ -35,7 +36,7 @@ UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 
 if not os.path.exists(UPLOAD_DIR): os.makedirs(UPLOAD_DIR)
 
-# 日志配置
+# Logging configuration
 logger = logging.getLogger("cattle_app")
 logger.setLevel(logging.INFO)
 file_handler = RotatingFileHandler("app.log", maxBytes=1024*1024, backupCount=1)
@@ -66,9 +67,9 @@ async def log_requests(request: Request, call_next):
         return JSONResponse(status_code=500, content={"detail": "Server Error"})
 
 # ==========================================
-# 2. 统一数据读写工具 (Helper)
+# 2. Unified Data Read/Write Utilities (Helper)
 # ==========================================
-# 彻底替代 db.py，防止路径混淆
+# Completely replace db.py to prevent path confusion
 def load_json(filepath):
     if not os.path.exists(filepath): return []
     try:
@@ -86,7 +87,7 @@ def append_record(filepath, record):
     data.append(record)
     save_json(filepath, data)
 
-# 通知助手
+# Notification helper
 def save_notification(user_id, title, details=None):
     notif = {
         "id": str(uuid.uuid4()),
@@ -98,15 +99,15 @@ def save_notification(user_id, title, details=None):
     }
     append_record(DB_NOTIFS, notif)
 
-# 简单匹配逻辑 (替代 matcher.py 以防路径问题)
+# Simple matching logic (replaces matcher.py to prevent path issues)
 def simple_match(new_record, target_file, is_farmer):
     targets = load_json(target_file)
     count = 0
     for t in targets:
-        # 简单匹配：同品种 + 状态开放
+        # Simple matching: same breed + status open
         if t.get('race') == new_record.get('race') and t.get('status', 'OPEN') == 'OPEN':
             count += 1
-            # 给对方发通知
+            # Send notification to the other party
             target_user = t.get('owner_id')
             if target_user:
                 role = "Farmer" if is_farmer else "Buyer"
@@ -114,7 +115,61 @@ def simple_match(new_record, target_file, is_farmer):
     return count
 
 # ==========================================
-# 3. 依赖与模型
+# 3. Two-Factor Authentication Storage (In-memory storage with expiration)
+# ==========================================
+verification_codes = {}  # {username: {"code": "123456", "expires_at": timestamp}}
+verified_users = {}  # {username: {"verified_at": timestamp}} - 5 minutes grace period
+
+def generate_verification_code():
+    """Generate 6-digit verification code"""
+    return str(random.randint(100000, 999999))
+
+def store_verification_code(username: str, code: str):
+    """Store verification code, expires in 10 minutes"""
+    expires_at = time.time() + 600  # Expires in 10 minutes
+    verification_codes[username] = {
+        "code": code,
+        "expires_at": expires_at
+    }
+
+def verify_code(username: str, code: str) -> bool:
+    """Verify verification code"""
+    if username not in verification_codes:
+        return False
+    
+    stored = verification_codes[username]
+    
+    # Check if expired
+    if time.time() > stored["expires_at"]:
+        del verification_codes[username]
+        return False
+    
+    # Verify code match
+    if stored["code"] == code:
+        # Delete verification code after successful verification (one-time use)
+        del verification_codes[username]
+        # Store verification timestamp for 5-minute grace period
+        verified_users[username] = {"verified_at": time.time()}
+        return True
+    
+    return False
+
+def is_recently_verified(username: str) -> bool:
+    """Check if user was verified within the last 5 minutes"""
+    if username not in verified_users:
+        return False
+    
+    verified_at = verified_users[username]["verified_at"]
+    # 5 minutes = 300 seconds
+    if time.time() - verified_at < 300:
+        return True
+    
+    # Expired, remove from cache
+    del verified_users[username]
+    return False
+
+# ==========================================
+# 4. Dependencies and Models
 # ==========================================
 def get_current_admin(current_user: str = Depends(get_current_user)):
     users = load_json(DB_USERS)
@@ -149,7 +204,7 @@ class CustomCity(BaseModel):
     name: str
 
 # ==========================================
-# 4. Auth 接口
+# 5. Auth Endpoints
 # ==========================================
 @app.post("/auth/register")
 def register(user: UserRegister):
@@ -179,7 +234,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
     return {"access_token": token, "token_type": "bearer", "role": user.get("role", "user"), "username": user['username']}
 
 # ==========================================
-# 5. 文件与基础接口
+# 6. File and Basic Endpoints
 # ==========================================
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...), user: str = Depends(get_current_user)):
@@ -197,21 +252,21 @@ def get_file(filename: str):
 
 @app.get("/api/market")
 def get_market():
-    # 市场只看 Supply (Farmers)
+    # Market only shows Supply (Farmers)
     farmers = load_json(DB_FARMERS)
     active = [f for f in farmers if f.get('status', 'OPEN') == 'OPEN']
     active.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
     return {"supply": active}
 
 # ==========================================
-# 6. 用户业务接口 (Listings)
+# 7. User Business Endpoints (Listings)
 # ==========================================
 @app.post("/api/farmer")
 def create_farmer(data: FarmerCreate, user: str = Depends(get_current_user)):
     rec = data.dict()
     rec.update({"id": str(uuid.uuid4()), "timestamp": time.time(), "owner_id": user, "status": "OPEN"})
     append_record(DB_FARMERS, rec)
-    # 简单的匹配通知
+    # Simple match notification
     count = simple_match(rec, DB_BUYERS, True)
     return {"id": rec['id'], "matches": count}
 
@@ -238,18 +293,18 @@ def get_notifs(user: str = Depends(get_current_user)):
     return sorted([n for n in notifs if n['user_id'] == user], key=lambda x: x.get('timestamp', 0), reverse=True)
 
 # ==========================================
-# 7. 提案与交易 (Proposals) - 修复重点
+# 8. Proposals and Transactions (Proposals) - Key Fixes
 # ==========================================
 @app.post("/api/proposals")
 def create_proposal(prop: Proposal, user: str = Depends(get_current_user)):
-    # 检查 Supply
+    # Check Supply
     farmers = load_json(DB_FARMERS)
     supply = next((f for f in farmers if f['id'] == prop.supply_id), None)
 
     if not supply: raise HTTPException(404, "Supply not found")
     if supply.get('status') != 'OPEN': raise HTTPException(400, "Listing not open")
 
-    # 检查用户角色
+    # Check user role
     users = load_json(DB_USERS)
     u_data = next((u for u in users if u['username'] == user), {})
     if u_data.get('role') == 'farmer': raise HTTPException(400, "Farmers cannot buy")
@@ -270,21 +325,21 @@ def create_proposal(prop: Proposal, user: str = Depends(get_current_user)):
 
     append_record(DB_PROPOSALS, new_prop)
 
-    # 给 Farmer 发通知
+    # Send notification to Farmer
     save_notification(supply['owner_id'], f"New Offer: R$ {prop.price_offer}", new_prop)
 
     return {"msg": "Sent", "id": new_prop['id']}
 
 @app.get("/api/my-proposals")
 def get_received_proposals(user: str = Depends(get_current_user)):
-    # 我是 Farmer，查看发给我的提案
+    # I am Farmer, view proposals sent to me
     farmers = load_json(DB_FARMERS)
     proposals = load_json(DB_PROPOSALS)
 
     my_supply_ids = [f['id'] for f in farmers if f.get('owner_id') == user]
     received = [p for p in proposals if p['supply_id'] in my_supply_ids]
 
-    # 填充供应详情（与sent proposals一致）
+    # Fill supply details (consistent with sent proposals)
     for p in received:
         supply = next((f for f in farmers if f['id'] == p['supply_id']), None)
         if supply:
@@ -306,13 +361,13 @@ def get_received_proposals(user: str = Depends(get_current_user)):
 
 @app.get("/api/my-sent-proposals")
 def get_sent_proposals(user: str = Depends(get_current_user)):
-    # 我是 Buyer，查看我发出的
+    # I am Buyer, view proposals I sent
     proposals = load_json(DB_PROPOSALS)
     farmers = load_json(DB_FARMERS)
 
     sent = [p for p in proposals if p['buyer_id'] == user]
 
-    # 填充详情
+    # Fill details
     for p in sent:
         supply = next((f for f in farmers if f['id'] == p['supply_id']), None)
         if supply:
@@ -340,28 +395,28 @@ def handle_proposal(pid: str, action: str, user: str = Depends(get_current_user)
     prop = next((p for p in proposals if p['id'] == pid), None)
     if not prop: raise HTTPException(404, "Not found")
 
-    # 验证权限：只有卖家可以接受/拒绝提案
+    # Verify permission: only seller can accept/reject proposals
     farmers = load_json(DB_FARMERS)
     supply = next((f for f in farmers if f['id'] == prop['supply_id']), None)
     if not supply:
         raise HTTPException(404, "Supply not found")
     
-    # 只有卖家（supply的owner）可以接受或拒绝
+    # Only seller (supply owner) can accept or reject
     if supply.get('owner_id') != user:
         raise HTTPException(403, "Only the seller can accept or reject proposals")
 
     if action == 'reject':
         prop['status'] = 'REJECTED'
     elif action == 'accept':
-        # 检查提案是否已经被接受
+        # Check if proposal has already been accepted
         if prop.get('status') != 'PENDING':
             raise HTTPException(400, "Proposal is not in PENDING status")
         
         prop['status'] = 'ACCEPTED'
-        # 锁定 Supply
+        # Lock Supply
         supply['status'] = 'AWAITING_PAYMENT'
         supply['buyer_id'] = prop['buyer_id']
-        save_json(DB_FARMERS, farmers) # 保存状态
+        save_json(DB_FARMERS, farmers) # Save status
 
         # 通知买家
         save_notification(prop['buyer_id'], "Offer Accepted! Pay reservation deposit to lock the deal.", prop)
@@ -383,7 +438,7 @@ def pay_fee(pid: str, user: str = Depends(get_current_user)):
 
     if not supply: raise HTTPException(404)
 
-    # 状态流转
+    # Status transition
     supply['status'] = 'RESERVED'  # Changed from 'SOLD' to 'RESERVED'
     prop['status'] = 'PAID'
     prop['deposit_paid_at'] = time.time()
@@ -407,7 +462,7 @@ def pay_fee(pid: str, user: str = Depends(get_current_user)):
     }
 
 # ==========================================
-# 8. Admin & System
+# 9. Admin & System
 # ==========================================
 def get_refs():
     if not os.path.exists(DB_REFS):
@@ -453,7 +508,7 @@ def admin_stats(admin: dict = Depends(get_current_admin)):
         "total_users": len(load_json(DB_USERS)),
         "total_supply": len(load_json(DB_FARMERS)),
         "total_demand": len(load_json(DB_BUYERS)),
-        "recent_activity": [] # 简化
+        "recent_activity": [] # Simplified
     }
 
 @app.get("/api/admin/users")
@@ -501,10 +556,159 @@ def clear_logs(admin: dict = Depends(get_current_admin)):
     return {"msg": "Cleared"}
 
 # ==========================================
-# 在你现有的 main.py 文件末尾添加以下新功能
+# Two-Factor Authentication Endpoints
 # ==========================================
 
-# 新增：称重记录模型
+class VerifyCodeRequest(BaseModel):
+    code: str
+
+@app.post("/api/2fa/send-code")
+def send_2fa_code(current_user: str = Depends(get_current_user)):
+    """
+    Send two-factor authentication code to user's email
+    """
+    users = load_json(DB_USERS)
+    user = next((u for u in users if u['username'] == current_user), None)
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    email = user.get('email')
+    if not email:
+        raise HTTPException(status_code=400, detail="User email not found")
+    
+    # Generate verification code
+    code = generate_verification_code()
+    
+    # Store verification code
+    store_verification_code(current_user, code)
+    
+    # Send email
+    success = send_verification_code_email(email, code)
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to send verification code")
+    
+    return {"status": "success", "msg": "Verification code sent to your email"}
+
+@app.post("/api/2fa/verify-code")
+def verify_2fa_code(req: VerifyCodeRequest, current_user: str = Depends(get_current_user)):
+    """
+    Verify two-factor authentication code
+    """
+    if verify_code(current_user, req.code):
+        return {"status": "success", "verified": True, "grace_period": 300}
+    else:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code")
+
+# ==========================================
+# Email Configuration Management (Admin)
+# ==========================================
+
+class EmailConfigUpdate(BaseModel):
+    smtp_server: str
+    smtp_port: int
+    smtp_login: str
+    smtp_password: str
+    sender_name: str
+
+@app.get("/api/admin/email-config")
+def get_email_config_api(admin: dict = Depends(get_current_admin)):
+    """Get email configuration"""
+    return get_email_config()
+
+@app.post("/api/admin/email-config")
+def update_email_config(config: EmailConfigUpdate, admin: dict = Depends(get_current_admin)):
+    """Update email configuration"""
+    # Validate port range
+    if not (1 <= config.smtp_port <= 65535):
+        raise HTTPException(status_code=400, detail="SMTP port must be between 1 and 65535")
+    
+    # Validate required fields
+    if not config.smtp_server or not config.smtp_login:
+        raise HTTPException(status_code=400, detail="SMTP server and login are required")
+    
+    # Save configuration
+    config_dict = {
+        "smtp_server": config.smtp_server,
+        "smtp_port": config.smtp_port,
+        "smtp_login": config.smtp_login,
+        "smtp_password": config.smtp_password,
+        "sender_name": config.sender_name
+    }
+    
+    if save_email_config(config_dict):
+        # Reload configuration
+        reload_email_config()
+        return {"status": "success", "msg": "Email configuration updated successfully"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to save email configuration")
+
+@app.post("/api/admin/email-config/test")
+def test_email_config(config: EmailConfigUpdate, admin: dict = Depends(get_current_admin)):
+    """Test email configuration (send test email)"""
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        
+        # Get admin email
+        users = load_json(DB_USERS)
+        admin_user = next((u for u in users if u['username'] == admin['username']), None)
+        
+        if not admin_user or not admin_user.get('email'):
+            raise HTTPException(status_code=400, detail="Admin email not found")
+        
+        test_email = admin_user['email']
+        
+        # Build test email
+        msg = MIMEMultipart()
+        msg['From'] = f"{config.sender_name} <{config.smtp_login}>"
+        msg['To'] = test_email
+        msg['Subject'] = "Test Email - Cattle Match System"
+        
+        html_content = f"""
+        <html>
+        <body style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #333; line-height: 1.6;">
+        <div style="max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 8px; overflow: hidden;">
+        <div style="background: #2c3e50; color: white; padding: 20px; text-align: center;">
+        <h2 style="margin: 0;">Email Configuration Test</h2>
+        </div>
+        <div style="padding: 30px;">
+        <p>Hello,</p>
+        <p>This is a test email to verify your email configuration is working correctly.</p>
+        <p style="font-size: 0.9em; color: #666;">
+        If you received this email, your SMTP settings are configured properly.
+        </p>
+        </div>
+        </div>
+        </body>
+        </html>
+        """
+        
+        msg.attach(MIMEText(html_content, 'html'))
+        
+        # Connect to server
+        if config.smtp_port == 465:
+            server = smtplib.SMTP_SSL(config.smtp_server, config.smtp_port)
+        else:
+            server = smtplib.SMTP(config.smtp_server, config.smtp_port)
+            server.starttls()
+        
+        server.login(config.smtp_login, config.smtp_password)
+        server.sendmail(config.smtp_login, test_email, msg.as_string())
+        server.quit()
+        
+        return {"status": "success", "msg": "Test email sent successfully. Please check your inbox."}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to send test email: {str(e)}")
+
+# ==========================================
+# Add the following new features at the end of your existing main.py file
+# ==========================================
+
+# New: Weight entry model
 class WeightEntry(BaseModel):
     batch_number: int
     quantity: int
@@ -532,12 +736,12 @@ class FinalPayment(BaseModel):
     yield_rate: float = Field(ge=0.48, le=0.55, default=0.52)
 
 # ==========================================
-# 称重管理 API (生重模式)
+# Weight Management API (Live Weight Mode)
 # ==========================================
 
 @app.post("/api/listings/{listing_id}/weights")
 def add_weight_entry(listing_id: str, weight: WeightEntry, user: str = Depends(get_current_user)):
-    """添加称重记录 (生重模式)"""
+    """Add weight entry (live weight mode)"""
     farmers = load_json(DB_FARMERS)
     listing = next((f for f in farmers if f['id'] == listing_id), None)
 
@@ -547,20 +751,20 @@ def add_weight_entry(listing_id: str, weight: WeightEntry, user: str = Depends(g
     if listing.get('owner_id') != user:
         raise HTTPException(403, "Not authorized")
 
-    # 检查是否为生重模式
+    # Check if it's live weight mode
     weight_type = listing.get('weight_type', 'live')
     if weight_type != 'live':
         raise HTTPException(400, "This listing is for dead weight. Use internal weight endpoint for reference only.")
 
-    # 确保列表支持称重（已接受提案且支付定金）
+    # Ensure listing supports weighing (proposal accepted and deposit paid)
     if listing.get('status') not in ['RESERVED', 'SOLD', 'AWAITING_PAYMENT']:
         raise HTTPException(400, "Listing must be reserved first")
 
-    # 创建 weights 数据文件路径
+    # Create weights data file path
     DB_WEIGHTS = os.path.join(BASE_DIR, "weights.json")
     weights = load_json(DB_WEIGHTS)
 
-    # 添加称重记录
+    # Add weight entry
     weight_data = weight.dict()
     weight_data['listing_id'] = listing_id
     if not weight_data.get('timestamp'):
@@ -569,12 +773,12 @@ def add_weight_entry(listing_id: str, weight: WeightEntry, user: str = Depends(g
     weights.append(weight_data)
     save_json(DB_WEIGHTS, weights)
 
-    # 检查是否完成所有称重
+    # Check if all weighing is completed
     listing_weights = [w for w in weights if w['listing_id'] == listing_id]
     total_quantity = sum(w['quantity'] for w in listing_weights)
 
     if total_quantity >= listing.get('quantity', 0):
-        # 通知农场主称重完成
+        # Notify farmer that weighing is completed
         save_notification(user, f"Weighing completed for listing #{listing_id}", {
             "listing_id": listing_id,
             "total_weighed": total_quantity
@@ -588,7 +792,7 @@ def add_weight_entry(listing_id: str, weight: WeightEntry, user: str = Depends(g
 
 @app.get("/api/listings/{listing_id}/weights")
 def get_weights(listing_id: str, user: str = Depends(get_current_user)):
-    """获取称重记录"""
+    """Get weight entries"""
     DB_WEIGHTS = os.path.join(BASE_DIR, "weights.json")
     weights = load_json(DB_WEIGHTS)
 
@@ -606,12 +810,12 @@ def get_weights(listing_id: str, user: str = Depends(get_current_user)):
     }
 
 # ==========================================
-# 死重模式 - 内部称重（可选）
+# Dead Weight Mode - Internal Weighing (Optional)
 # ==========================================
 
 @app.post("/api/listings/{listing_id}/internal-weight")
 def record_internal_weight(listing_id: str, weight_data: InternalWeightRequest, user: str = Depends(get_current_user)):
-    """死重模式 - 农场主内部称重（可选，仅供参考）"""
+    """Dead weight mode - Farmer internal weighing (optional, for reference only)"""
     farmers = load_json(DB_FARMERS)
     listing = next((f for f in farmers if f['id'] == listing_id), None)
 
@@ -622,22 +826,22 @@ def record_internal_weight(listing_id: str, weight_data: InternalWeightRequest, 
     if weight_type != 'dead':
         raise HTTPException(400, "Internal weight is only for dead weight transactions")
 
-    # 如果提供了称重数据，记录它（用于内部跟踪）
+    # If weight data is provided, record it (for internal tracking)
     if weight_data.perform_weighing:
         if not weight_data.quantity or not weight_data.total_weight:
             raise HTTPException(400, "quantity and total_weight are required when perform_weighing is true")
         
-        # 使用与生重相同的称重格式
+        # Use the same weight format as live weight
         DB_WEIGHTS = os.path.join(BASE_DIR, "weights.json")
         weights = load_json(DB_WEIGHTS)
         
-        # 记录内部称重（标记为内部使用）
+        # Record internal weight (marked as internal use)
         weight_entry = {
             "listing_id": listing_id,
             "batch_number": weight_data.batch_number or 1,
             "quantity": weight_data.quantity,
             "total_weight": weight_data.total_weight,
-            "is_internal": True,  # 标记为内部称重
+            "is_internal": True,  # Marked as internal weighing
             "timestamp": datetime.now().isoformat()
         }
         weights.append(weight_entry)
@@ -646,7 +850,7 @@ def record_internal_weight(listing_id: str, weight_data: InternalWeightRequest, 
         listing['internal_weight_recorded'] = True
         listing['internal_weight_recorded_at'] = time.time()
     else:
-        # 不进行称重，直接标记为可运输
+        # Skip weighing, directly mark as ready for transport
         listing['internal_weight_skipped'] = True
         listing['internal_weight_skipped_at'] = time.time()
 
@@ -658,12 +862,12 @@ def record_internal_weight(listing_id: str, weight_data: InternalWeightRequest, 
     }
 
 # ==========================================
-# 死重模式 - 请求预付款
+# Dead Weight Mode - Request Advance Payment
 # ==========================================
 
 @app.post("/api/listings/{listing_id}/request-advance")
 def request_advance_payment(listing_id: str, pauta_value: float, user: str = Depends(get_current_user)):
-    """请求象征性预付款 (Pauta Value)"""
+    """Request symbolic advance payment (Pauta Value)"""
     farmers = load_json(DB_FARMERS)
     listing = next((f for f in farmers if f['id'] == listing_id), None)
 
@@ -685,26 +889,26 @@ def request_advance_payment(listing_id: str, pauta_value: float, user: str = Dep
     return {"message": "Advance payment requested"}
 
 # ==========================================
-# 最终结算
+# Final Settlement
 # ==========================================
 
 @app.post("/api/listings/{listing_id}/finalize")
 def finalize_transaction(listing_id: str, payment: FinalPayment, user: str = Depends(get_current_user)):
-    """提交最终文档并计算金额"""
+    """Submit final documents and calculate amount"""
     farmers = load_json(DB_FARMERS)
     listing = next((f for f in farmers if f['id'] == listing_id), None)
 
     if not listing or listing.get('owner_id') != user:
         raise HTTPException(403, "Not authorized")
 
-    # 获取接受的提案
+    # Get accepted proposal
     proposals = load_json(DB_PROPOSALS)
     proposal = next((p for p in proposals if p['supply_id'] == listing_id and p['status'] == 'PAID'), None)
 
     if not proposal:
         raise HTTPException(400, "No accepted proposal found")
 
-    # 创建交易记录
+    # Create transaction record
     DB_TRANSACTIONS = os.path.join(BASE_DIR, "transactions.json")
     transactions = load_json(DB_TRANSACTIONS)
 
@@ -721,19 +925,19 @@ def finalize_transaction(listing_id: str, payment: FinalPayment, user: str = Dep
         "timestamp": time.time()
     }
 
-    # 判断是生重还是死重模式
+    # Determine if it's live weight or dead weight mode
     weight_type = listing.get('weight_type', 'live')
     
-    # 计算金额（生重模式）
+    # Calculate amount (live weight mode)
     DB_WEIGHTS = os.path.join(BASE_DIR, "weights.json")
     weights = load_json(DB_WEIGHTS)
     listing_weights = [w for w in weights if w['listing_id'] == listing_id]
 
     if weight_type == 'live' and listing_weights:
-        # 生重模式：基于实际称重计算
+        # Live weight mode: calculate based on actual weighing
         total_weight = sum(w['total_weight'] for w in listing_weights)
-        at_quantity = total_weight / 15  # 转换为 @ (arroba)
-        # 使用 price_per_unit 如果可用，否则使用 price_offer
+        at_quantity = total_weight / 15  # Convert to @ (arroba)
+        # Use price_per_unit if available, otherwise use price_offer
         price_per_arroba = proposal.get('price_per_unit') or (proposal['price_offer'] / (listing.get('quantity', 1) * listing.get('estimated_weight', 1) / 15))
         final_amount = at_quantity * payment.yield_rate * price_per_arroba
 
@@ -748,14 +952,14 @@ def finalize_transaction(listing_id: str, payment: FinalPayment, user: str = Dep
             "status": "awaiting_final_payment"
         })
     elif weight_type == 'dead':
-        # 死重模式 - 等待屠宰场称重
+        # Dead weight mode - waiting for slaughterhouse weighing
         transaction.update({
             "weight_type": "dead",
             "status": "awaiting_slaughterhouse_weight",
             "note": "Waiting for slaughterhouse weighing after slaughter"
         })
     else:
-        # 没有称重记录但标记为生重模式
+        # No weight records but marked as live weight mode
         transaction.update({
             "status": "awaiting_weighing",
             "note": "Waiting for weight confirmation"
@@ -769,7 +973,7 @@ def finalize_transaction(listing_id: str, payment: FinalPayment, user: str = Dep
     listing['transaction_id'] = transaction['id']
     save_json(DB_FARMERS, farmers)
 
-    # 通知买家需支付尾款
+    # Notify buyer to pay final payment
     save_notification(listing.get('buyer_id'), f"Final payment required: R$ {transaction.get('final_amount', 0):.2f}", {
         "transaction_id": transaction['id'],
         "listing_id": listing_id,
@@ -785,7 +989,7 @@ def finalize_transaction(listing_id: str, payment: FinalPayment, user: str = Dep
     }
 
 # ==========================================
-# 死重模式 - 屠宰场提交最终称重
+# Dead Weight Mode - Slaughterhouse Submit Final Weight
 # ==========================================
 
 @app.post("/api/transactions/{transaction_id}/slaughterhouse-weight")
@@ -794,7 +998,7 @@ def submit_slaughterhouse_weight(
         weight_data: SlaughterhouseWeightData,
         user: str = Depends(get_current_user)
 ):
-    """屠宰场提交最终称重结果（死重模式）"""
+    """Slaughterhouse submit final weight result (dead weight mode)"""
     DB_TRANSACTIONS = os.path.join(BASE_DIR, "transactions.json")
     transactions = load_json(DB_TRANSACTIONS)
 
@@ -812,7 +1016,7 @@ def submit_slaughterhouse_weight(
     yield_rate = weight_data.yield_rate or 0.52
     price_per_unit = weight_data.price_per_unit
 
-    # 计算金额（死重：直接使用胴体重）
+    # Calculate amount (dead weight: directly use carcass weight)
     at_quantity = final_weight / 15
     final_amount = at_quantity * price_per_unit
 
@@ -837,7 +1041,7 @@ def submit_slaughterhouse_weight(
         listing['status'] = 'COMPLETED'
         save_json(DB_FARMERS, farmers)
         
-        # 通知农场主
+        # Notify farmer
         save_notification(listing['owner_id'], f"Final weighing completed by slaughterhouse", {
             "transaction_id": transaction_id,
             "final_weight": final_weight,
@@ -855,12 +1059,12 @@ def submit_slaughterhouse_weight(
     }
 
 # ==========================================
-# 获取交易详情
+# Get Transaction Details
 # ==========================================
 
 @app.get("/api/transactions/by-listing/{listing_id}")
 def get_transaction_by_listing(listing_id: str, user: str = Depends(get_current_user)):
-    """通过 listing_id 获取交易（用于前端根据 listing 跳转）"""
+    """Get transaction by listing_id (for frontend to navigate based on listing)"""
     DB_TRANSACTIONS = os.path.join(BASE_DIR, "transactions.json")
     transactions = load_json(DB_TRANSACTIONS)
 
@@ -869,7 +1073,7 @@ def get_transaction_by_listing(listing_id: str, user: str = Depends(get_current_
     if not transaction:
         raise HTTPException(404, "Transaction not found")
 
-    # 验证用户权限（生产者或买家）
+    # Verify user permission (producer or buyer)
     farmers = load_json(DB_FARMERS)
     listing = next((f for f in farmers if f['id'] == listing_id), None)
     if listing:
@@ -883,7 +1087,7 @@ def get_transaction_by_listing(listing_id: str, user: str = Depends(get_current_
 
 @app.get("/api/transactions/{transaction_id}")
 def get_transaction(transaction_id: str, user: str = Depends(get_current_user)):
-    """通过交易ID获取交易详情"""
+    """Get transaction details by transaction ID"""
     DB_TRANSACTIONS = os.path.join(BASE_DIR, "transactions.json")
     transactions = load_json(DB_TRANSACTIONS)
 
@@ -896,7 +1100,7 @@ def get_transaction(transaction_id: str, user: str = Depends(get_current_user)):
 
 @app.post("/api/transactions/{transaction_id}/pay-final")
 def pay_final_payment(transaction_id: str, user: str = Depends(get_current_user)):
-    """买家支付尾款"""
+    """Buyer pay final payment"""
     DB_TRANSACTIONS = os.path.join(BASE_DIR, "transactions.json")
     transactions = load_json(DB_TRANSACTIONS)
 
@@ -914,7 +1118,7 @@ def pay_final_payment(transaction_id: str, user: str = Depends(get_current_user)
     if transaction.get('status') != 'awaiting_final_payment':
         raise HTTPException(400, f"Transaction is not awaiting final payment. Current status: {transaction.get('status')}")
 
-    # 更新交易状态
+    # Update transaction status
     transaction['status'] = 'final_payment_paid'
     transaction['final_payment_paid_at'] = time.time()
     transaction['final_payment_paid_by'] = user
@@ -942,7 +1146,7 @@ def pay_final_payment(transaction_id: str, user: str = Depends(get_current_user)
 
 @app.post("/api/transactions/{transaction_id}/confirm-payment")
 def confirm_payment_receipt(transaction_id: str, user: str = Depends(get_current_user)):
-    """生产者确认收到付款，触发押金退款"""
+    """Producer confirms payment received, trigger deposit refund"""
     DB_TRANSACTIONS = os.path.join(BASE_DIR, "transactions.json")
     transactions = load_json(DB_TRANSACTIONS)
 
@@ -950,7 +1154,7 @@ def confirm_payment_receipt(transaction_id: str, user: str = Depends(get_current
     if not transaction:
         raise HTTPException(404, "Transaction not found")
 
-    # 验证用户是生产者
+    # Verify user is producer
     farmers = load_json(DB_FARMERS)
     listing = next((f for f in farmers if f['id'] == transaction['listing_id']), None)
     if not listing or listing.get('owner_id') != user:
@@ -960,7 +1164,7 @@ def confirm_payment_receipt(transaction_id: str, user: str = Depends(get_current
     if transaction.get('status') != 'final_payment_paid':
         raise HTTPException(400, f"Final payment must be paid first. Current status: {transaction.get('status')}")
 
-    # 处理押金退款
+    # Process deposit refund
     proposals = load_json(DB_PROPOSALS)
     proposal = next((p for p in proposals if p['id'] == transaction['proposal_id']), None)
     
@@ -971,7 +1175,7 @@ def confirm_payment_receipt(transaction_id: str, user: str = Depends(get_current
         proposal['payment_confirmed_at'] = time.time()
         save_json(DB_PROPOSALS, proposals)
 
-        # 通知买家押金已退还
+        # Notify buyer that deposit has been refunded
         save_notification(proposal['buyer_id'], f"Reservation deposit refunded: R$ {proposal.get('deposit_amount', 0):.2f}", {
             "transaction_id": transaction_id,
             "refund_amount": proposal.get('deposit_amount', 0)
@@ -982,7 +1186,7 @@ def confirm_payment_receipt(transaction_id: str, user: str = Depends(get_current
         transaction['status'] = 'completed'
         save_json(DB_TRANSACTIONS, transactions)
 
-        # 更新列表状态为完成
+        # Update listing status to completed
         farmers = load_json(DB_FARMERS)
         listing = next((f for f in farmers if f['id'] == transaction['listing_id']), None)
         if listing:

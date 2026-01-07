@@ -49,6 +49,7 @@ const logout = () => {
         <a @click="navigate('/admin/users')" class="nav-item">👥 User Mgmt</a>
         <a @click="navigate('/admin/listings')" class="nav-item">📝 Listings</a>
         <a @click="navigate('/admin/data')" class="nav-item">🗂️ Data & Refs</a>
+        <a @click="navigate('/admin/email-config')" class="nav-item">📧 Email Config</a>
         <a @click="navigate('/admin/logs')" class="nav-item">⚠️ Error Logs</a>
 
         <div class="divider"></div>
