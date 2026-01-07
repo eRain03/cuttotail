@@ -133,10 +133,11 @@ const closeDetails = () => {
 }
 
 .terminal-container {
-  font-family: 'Courier New', monospace; /* 必须是等宽字体 */
+  font-family: 'Courier New', monospace; /* Must be monospace font */
   color: var(--term-main);
   max-width: 800px;
-  margin: 0 auto; /* 中心化 */
+  margin: 0 auto; /* Centered */
+  padding: 0 20px;
 }
 
 /* 列表头部 */
@@ -274,5 +275,56 @@ const closeDetails = () => {
 .accept:hover {
   background: var(--term-main);
   color: #000;
+}
+
+/* Mobile responsive styles */
+@media (max-width: 768px) {
+  .terminal-container {
+    padding: 0 10px;
+    max-width: 100%;
+  }
+  
+  .list-header {
+    font-size: 10px;
+    padding: 3px 0;
+  }
+  
+  .col-id { width: 40px; font-size: 0.7rem; }
+  .col-breed { width: 100px; font-size: 0.85rem; }
+  .col-weight { width: 60px; font-size: 0.85rem; }
+  .col-price { width: 70px; font-size: 0.85rem; }
+  
+  .proposal-row {
+    padding: 8px 0;
+    font-size: 0.85rem;
+  }
+  
+  .action-btn {
+    padding: 4px 8px;
+    font-size: 0.7rem;
+    margin: 2px;
+  }
+  
+  .modal-overlay {
+    padding: 10px;
+  }
+  
+  .modal-content {
+    max-width: 95vw;
+    padding: 20px 15px;
+  }
+  
+  .modal-content h2 {
+    font-size: 1.2rem;
+  }
+  
+  .info-box {
+    padding: 15px;
+    font-size: 0.85rem;
+  }
+  
+  .info-box ul {
+    padding-left: 15px;
+  }
 }
 </style>

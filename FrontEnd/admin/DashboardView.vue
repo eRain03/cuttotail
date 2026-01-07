@@ -144,4 +144,62 @@ tr:last-child td { border-bottom: none; }
 .location { color: #555; }
 .time { color: #999; font-size: 0.85rem; }
 .empty { text-align: center; padding: 30px; font-style: italic; color: #ccc; }
+
+/* Mobile responsive styles */
+@media (max-width: 768px) {
+  .page-header {
+    margin-bottom: 20px;
+  }
+  
+  .page-title {
+    font-size: 1.4rem;
+  }
+  
+  .stats-grid {
+    grid-template-columns: 1fr;
+    gap: 15px;
+  }
+  
+  .stat-card {
+    padding: 20px;
+  }
+  
+  .stat-card .icon {
+    font-size: 2rem;
+    margin-right: 15px;
+  }
+  
+  .stat-card .number {
+    font-size: 1.8rem;
+  }
+  
+  .recent-section {
+    padding: 15px;
+  }
+  
+  .section-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  
+  .table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  table {
+    font-size: 0.8rem;
+    min-width: 600px;
+  }
+  
+  th, td {
+    padding: 10px 8px;
+  }
+  
+  .badge {
+    font-size: 0.65rem;
+    padding: 3px 6px;
+  }
+}
 </style>

@@ -265,7 +265,7 @@ label { display: block; margin-bottom: 8px; font-weight: 500; font-size: 0.85rem
 input, select { width: 100%; padding: 12px; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 1rem; background: #fafafa; box-sizing: border-box; }
 .hint { font-size: 0.8rem; color: #bdc3c7; margin-top: 5px; }
 
-/* 区域选择器样式 */
+/* Region selector styles */
 .region-box { background: #f9f9f9; padding: 15px; border-radius: 8px; border: 1px dashed #ddd; }
 .controls { display: flex; gap: 10px; margin-bottom: 10px; }
 .small-select { width: 100px; }
@@ -277,6 +277,19 @@ input, select { width: 100%; padding: 12px; border: 1px solid #e0e0e0; border-ra
 .tag { background: #ffebee; color: #c62828; padding: 5px 12px; border-radius: 20px; font-size: 0.85rem; border: 1px solid #ffcdd2; display: flex; align-items: center; gap: 8px; }
 .remove-btn { cursor: pointer; font-weight: bold; opacity: 0.6; font-size: 1.1rem; line-height: 1; }
 .remove-btn:hover { opacity: 1; }
+
+/* Mobile responsive styles */
+@media (max-width: 768px) {
+  .form-page { padding: 0 15px; margin: 20px auto; }
+  .form-container { padding: 20px; }
+  .row { flex-direction: column; gap: 0; }
+  .half { width: 100%; }
+  .controls { flex-direction: column; }
+  .small-select, .big-select { width: 100%; }
+  .btn-add { width: 100%; padding: 12px; }
+  .tags-area { gap: 6px; }
+  .tag { font-size: 0.75rem; padding: 4px 10px; }
+}
 
 .btn-buy { width: 100%; padding: 14px; background: #c0392b; color: white; border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; margin-top: 10px; font-weight: 500; transition: background 0.2s; }
 .btn-buy:hover { background: #e74c3c; }

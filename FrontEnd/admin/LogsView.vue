@@ -81,4 +81,40 @@ onMounted(fetchLogs)
 
 .log-line { border-bottom: 1px solid #333; padding: 2px 0; }
 .log-line:last-child { border-bottom: none; }
+
+/* Mobile responsive styles */
+@media (max-width: 768px) {
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 15px;
+  }
+  
+  .page-title {
+    font-size: 1.4rem;
+  }
+  
+  .header > div {
+    display: flex;
+    width: 100%;
+    gap: 10px;
+  }
+  
+  .btn {
+    flex: 1;
+    margin-left: 0;
+    padding: 10px;
+  }
+  
+  .terminal-window {
+    height: 400px;
+    padding: 15px;
+    font-size: 0.75rem;
+  }
+  
+  .log-line {
+    word-break: break-word;
+    overflow-wrap: break-word;
+  }
+}
 </style>

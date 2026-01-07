@@ -49,4 +49,13 @@ onMounted(async () => {
 .time { font-size: 0.8rem; color: #999; margin-top: 5px; }
 .back { text-decoration: none; color: #666; display: block; margin-bottom: 20px; }
 .empty { text-align: center; color: #999; margin-top: 50px; }
+
+/* Mobile responsive styles */
+@media (max-width: 768px) {
+  .notif-page { padding: 15px; margin: 20px auto; }
+  .item { padding: 12px; margin-bottom: 8px; }
+  .msg { font-size: 0.9rem; word-break: break-word; }
+  .time { font-size: 0.75rem; }
+  h2 { font-size: 1.3rem; }
+}
 </style>

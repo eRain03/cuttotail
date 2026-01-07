@@ -468,4 +468,55 @@ const clearPassword = () => {
 .info-box strong {
   color: #2c3e50;
 }
+
+/* Mobile responsive styles */
+@media (max-width: 768px) {
+  .page-header {
+    margin-bottom: 20px;
+  }
+  
+  .page-title {
+    font-size: 1.4rem;
+  }
+  
+  .config-card {
+    padding: 20px 15px;
+  }
+  
+  .form-group {
+    margin-bottom: 15px;
+  }
+  
+  .form-input {
+    font-size: 0.9rem;
+    padding: 8px 10px;
+  }
+  
+  .action-buttons {
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  .btn {
+    width: 100%;
+  }
+  
+  .info-box {
+    padding: 15px;
+    font-size: 0.85rem;
+  }
+  
+  .info-box ul {
+    padding-left: 15px;
+  }
+  
+  .password-input-wrapper .form-input {
+    padding-right: 70px;
+  }
+  
+  .clear-btn {
+    font-size: 0.75rem;
+    padding: 4px 8px;
+  }
+}
 </style>

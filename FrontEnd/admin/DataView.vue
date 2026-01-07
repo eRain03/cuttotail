@@ -161,4 +161,59 @@ onMounted(loadData)
 .btn-icon { background: none; border: none; color: #c0392b; font-size: 1.2rem; cursor: pointer; font-weight: bold; line-height: 1; opacity: 0.6; }
 .btn-icon:hover { opacity: 1; }
 .empty { padding: 20px; text-align: center; color: #ccc; font-style: italic; }
+
+/* Mobile responsive styles */
+@media (max-width: 768px) {
+  .page-title {
+    font-size: 1.4rem;
+    margin-bottom: 15px;
+  }
+  
+  .grid-layout {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  
+  .panel {
+    height: auto;
+    min-height: 400px;
+  }
+  
+  .panel-header {
+    padding: 15px;
+  }
+  
+  .panel-header h3 {
+    font-size: 1rem;
+  }
+  
+  .panel-body {
+    padding: 15px;
+  }
+  
+  .add-box {
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .state-select {
+    width: 100%;
+  }
+  
+  .btn-add {
+    width: 100%;
+    padding: 12px;
+  }
+  
+  .list-item {
+    padding: 8px 12px;
+    font-size: 0.9rem;
+  }
+  
+  .list-item span {
+    word-break: break-word;
+    flex: 1;
+    margin-right: 10px;
+  }
+}
 </style>
